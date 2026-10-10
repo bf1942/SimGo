@@ -1,0 +1,34 @@
+diff --git a/at_response.c b/at_response.c
+index 175794d..0000000 100644
+--- a/at_response.c
++++ b/at_response.c
+@@ -2538,8 +2538,24 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res
+ 				}
+ 				ast_log (LOG_WARNING, "[%s] Receive NO CARRIER\n", PVT_ID(pvt));
+-
+-                               return 0;
++
++				/*
++				 * EC20F may report remote hangup only as NO CARRIER.  The
++				 * upstream handler used to log and return, leaving the cpvt
++				 * in Active/Dialing forever.  Asterisk therefore kept the SIP
++				 * leg Up and the next call could fail with cause 44.
++				 *
++				 * Release the current voice cpvt immediately and ask the modem
++				 * for a fresh CLCC snapshot to reconcile any remaining calls.
++				 */
++				{
++					struct cpvt *cpvt = active_cpvt(pvt);
++					if (cpvt)
++					{
++						if (CPVT_IS_SOUND_SOURCE(cpvt))
++							voice_disable(pvt);
++						pvt->call_estb = 0;
++						CPVT_RESET_FLAGS(cpvt, CALL_FLAG_NEED_HANGUP);
++						change_channel_state(cpvt, CALL_STATE_RELEASED, 0);
++					}
++					request_clcc(pvt);
++				}
++				return 0;
+ 
+ 			case RES_CPIN:
