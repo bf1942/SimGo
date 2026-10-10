@@ -20,13 +20,14 @@ WORKDIR /tmp/chan-quectel
 
 RUN ./bootstrap
 
-RUN MODULE_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/asterisk/modules" \
-    && ASTERISK_VER=$(dpkg-query -W -f='${Version}' asterisk-dev | sed 's/.*://' | sed 's/~.*//') \
-    && ./configure DESTDIR=${MODULE_DIR} --with-astversion=${ASTERISK_VER} \
+# The upstream Makefile always creates chan_quectel.so in the build directory.
+# Do not depend on its install DESTDIR when exporting the module between stages;
+# copy the build artifact directly and assert that it exists.
+RUN ASTERISK_VER=$(dpkg-query -W -f='${Version}' asterisk-dev | sed 's/.*://' | sed 's/~.*//') \
+    && ./configure DESTDIR=/tmp --with-astversion=${ASTERISK_VER} \
     && make \
-    && mkdir -p ${MODULE_DIR} \
-    && make install \
-    && cp ${MODULE_DIR}/chan_quectel.so /tmp/chan_quectel.so
+    && test -s ./chan_quectel.so \
+    && cp ./chan_quectel.so /tmp/chan-quectel.so
 
 # ---- Runtime stage ----
 FROM ubuntu:24.04
@@ -43,8 +44,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy compiled chan-quectel module to correct arch path
-COPY --from=builder /tmp/chan-quectel.so /tmp/chan_quectel.so
-RUN cp /tmp/chan_quectel.so /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/asterisk/modules/chan_quectel.so
+COPY --from=builder /tmp/chan-quectel.so /tmp/chan-quectel.so
+RUN cp /tmp/chan-quectel.so /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/asterisk/modules/chan_quectel.so
 
 # Asterisk directories
 RUN mkdir -p /etc/asterisk/templates /etc/asterisk/scripts /etc/asterisk/certs \
