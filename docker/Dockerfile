@@ -18,13 +18,13 @@ RUN git clone --depth 1 https://github.com/myleo1/asterisk-chan-quectel-lts.git 
 
 WORKDIR /tmp/chan-quectel
 
-# EC20F can emit remote hangup as NO CARRIER without the call-end URC that
-# chan_quectel expects. Apply a semantic source rewrite that turns NO CARRIER
-# into the same Released state transition used by the normal CEND path.
+# EC20F can report NO CARRIER while a user AT command owns the queue. Apply a
+# semantic rewrite that releases the call/cpvt first, then retires the command,
+# preventing orphan INIT/Dialing state from blocking immediate redial.
 COPY docker/patch-chan-quectel-ec20f.sh /tmp/patch-chan-quectel-ec20f.sh
 RUN chmod +x /tmp/patch-chan-quectel-ec20f.sh \
     && /tmp/patch-chan-quectel-ec20f.sh /tmp/chan-quectel/at_response.c \
-    && grep -q 'SimGo EC20F: remote hangup may only emit NO CARRIER' /tmp/chan-quectel/at_response.c
+    && grep -q 'SimGo EC20F: release call state before CMD_USER handling' /tmp/chan-quectel/at_response.c
 
 RUN ./bootstrap
 
