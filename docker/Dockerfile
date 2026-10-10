@@ -14,17 +14,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 https://github.com/myleo1/asterisk-chan-quectel-lts.git /tmp/chan-quectel
+# Pin upstream so the semantic EC20F patch is built against a known source
+# revision instead of a moving branch head.
+ARG CHAN_QUECTEL_REF=022323a93504ed493d80ef5b6be8316996373469
+RUN git clone https://github.com/myleo1/asterisk-chan-quectel-lts.git /tmp/chan-quectel \
+    && cd /tmp/chan-quectel \
+    && git checkout "${CHAN_QUECTEL_REF}"
 
 WORKDIR /tmp/chan-quectel
 
-# EC20F can report NO CARRIER while a user AT command owns the queue. Apply a
-# semantic rewrite that releases the call/cpvt first, then retires the command,
-# preventing orphan INIT/Dialing state from blocking immediate redial.
+# EC20F may report remote hangup only as NO CARRIER. Rewrite that handler to
+# release the cpvt through the native Released path without changing/retiring
+# the AT queue after the release transition.
 COPY docker/patch-chan-quectel-ec20f.sh /tmp/patch-chan-quectel-ec20f.sh
 RUN chmod +x /tmp/patch-chan-quectel-ec20f.sh \
     && /tmp/patch-chan-quectel-ec20f.sh /tmp/chan-quectel/at_response.c \
-    && grep -q 'SimGo EC20F: release call state before CMD_USER handling' /tmp/chan-quectel/at_response.c
+    && grep -q 'SimGo EC20F: safe NO CARRIER release; do not mutate AT queue' /tmp/chan-quectel/at_response.c
 
 RUN ./bootstrap
 
