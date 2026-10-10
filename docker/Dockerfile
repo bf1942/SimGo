@@ -18,6 +18,13 @@ RUN git clone --depth 1 https://github.com/myleo1/asterisk-chan-quectel-lts.git 
 
 WORKDIR /tmp/chan-quectel
 
+# EC20F firmware may only emit NO CARRIER when the remote party hangs up.
+# Patch chan_quectel so that event releases the Asterisk channel instead of
+# leaving the driver stuck in Active/Dialing.
+COPY docker/patches/ec20f-no-carrier-release.patch /tmp/ec20f-no-carrier-release.patch
+RUN git apply --check /tmp/ec20f-no-carrier-release.patch \
+    && git apply /tmp/ec20f-no-carrier-release.patch
+
 RUN ./bootstrap
 
 # The upstream Makefile always creates chan_quectel.so in the build directory.
