@@ -43,7 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy compiled chan-quectel module to correct arch path
-COPY --from=builder /tmp/chan_quectel.so /tmp/chan_quectel.so
+COPY --from=builder /tmp/chan-quectel.so /tmp/chan_quectel.so
 RUN cp /tmp/chan_quectel.so /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/asterisk/modules/chan_quectel.so
 
 # Asterisk directories
@@ -57,6 +57,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 EXPOSE 52060/tcp 42077-42126/udp
 
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+COPY docker/entrypoint-clcc-sync.sh /entrypoint-clcc-sync.sh
+RUN chmod +x /start.sh /entrypoint-clcc-sync.sh
 
-ENTRYPOINT ["/start.sh"]
+ENTRYPOINT ["/entrypoint-clcc-sync.sh"]

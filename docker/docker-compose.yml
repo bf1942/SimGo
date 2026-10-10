@@ -28,6 +28,10 @@ services:
       - TG_SOCKS5_PROXY=${TG_SOCKS5_PROXY}
       - REC_FORMAT=${REC_FORMAT}
       - RECORDING_ENABLED=${RECORDING_ENABLED}
+      # EC20F call-state reconciliation. Keep enabled unless the modem/driver
+      # reliably emits answer/release URCs on its own.
+      - QUECTEL_CLCC_SYNC_ENABLED=${QUECTEL_CLCC_SYNC_ENABLED:-yes}
+      - QUECTEL_CLCC_SYNC_INTERVAL=${QUECTEL_CLCC_SYNC_INTERVAL:-1}
     logging:
       driver: json-file
       options:
