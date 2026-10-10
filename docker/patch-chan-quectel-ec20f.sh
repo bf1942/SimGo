@@ -4,30 +4,30 @@ set -eu
 file="${1:-at_response.c}"
 tmp="${file}.simgo.tmp"
 
-# Patch the RES_NO_CARRIER handler by semantic location instead of source line
-# numbers.
+# Patch EC20F call teardown by semantic location instead of source line numbers.
 #
-# Important ordering rules for EC20F:
-# - Preserve upstream CMD_USER handling unchanged. A terminal response owned by
-#   a synchronous user command must complete that command and return.
-# - For normal modem call teardown, release the cpvt using the same
-#   CALL_STATE_RELEASED path used by CEND/RCEND.
-# - Do NOT enqueue voice_disable/request_clcc and do NOT call
-#   at_queue_handle_result after releasing the cpvt. Enqueuing a command changes
-#   the AT queue head, and retiring the result afterwards can remove the wrong
-#   task and crash Asterisk.
+# 1) Remote hangup:
+#    EC20F may report only NO CARRIER. Preserve upstream CMD_USER handling, then
+#    release the cpvt through CALL_STATE_RELEASED without mutating the AT queue
+#    after the release transition.
 #
-# cpvt selection order covers both an established call and a failed/immediate
-# redial still represented by CALL_STATE_INIT:
-#   1. current AT task cpvt, unless it is sys_chan
-#   2. last_dialed_cpvt
-#   3. active_cpvt
+# 2) Local/SIP-side hangup:
+#    channel_hangup() queues AT+CHUP and drops the Asterisk channel reference.
+#    Some EC20F firmware returns OK but emits no CEND/NO CARRIER afterwards.
+#    Upstream only clears CALL_FLAG_NEED_HANGUP on that OK, leaving an orphan
+#    Active cpvt that blocks the next call. Treat successful AT+CHUP/CHLD=1x as
+#    authoritative and release the cpvt immediately.
 awk '
-BEGIN { in_nc = 0; replaced = 0 }
+BEGIN {
+    in_nc = 0
+    replaced_nc = 0
+    saw_hangup_reset = 0
+    inserted_local_release = 0
+}
 {
     if (!in_nc && $0 ~ /^[[:space:]]*case RES_NO_CARRIER:/) {
         in_nc = 1
-        replaced++
+        replaced_nc++
 
         print "\t\t\tcase RES_NO_CARRIER:"
         print "\t\t\t\tif (ecmd && ecmd->cmd == CMD_USER)"
@@ -70,14 +70,39 @@ BEGIN { in_nc = 0; replaced = 0 }
     }
 
     print
+
+    # This reset is unique to the successful CMD_AT_CHUP/CMD_AT_CHLD_1x block
+    # in the pinned upstream revision. Insert the release after its debug line
+    # so the original cpvt is still available for logging first.
+    if ($0 ~ /CPVT_RESET_FLAGS\(task->cpvt, CALL_FLAG_NEED_HANGUP\);/) {
+        saw_hangup_reset = 1
+        next
+    }
+
+    if (saw_hangup_reset && $0 ~ /task->cpvt->call_idx\);/) {
+        print ""
+        print "\t\t\t\t/* SimGo EC20F: AT+CHUP OK is authoritative for local hangup. */"
+        print "\t\t\t\tif (task->cpvt && task->cpvt != &pvt->sys_chan)"
+        print "\t\t\t\t{"
+        print "\t\t\t\t\tpvt->call_estb = 0;"
+        print "\t\t\t\t\tchange_channel_state(task->cpvt, CALL_STATE_RELEASED, 0);"
+        print "\t\t\t\t}"
+        saw_hangup_reset = 0
+        inserted_local_release++
+    }
 }
 END {
-    if (replaced != 1) {
-        print "SimGo EC20F patch: expected exactly one NO CARRIER handler, replaced " replaced > "/dev/stderr"
+    if (replaced_nc != 1) {
+        print "SimGo EC20F patch: expected exactly one NO CARRIER handler, replaced " replaced_nc > "/dev/stderr"
         exit 42
+    }
+    if (inserted_local_release != 1) {
+        print "SimGo EC20F patch: expected exactly one local hangup release insertion, inserted " inserted_local_release > "/dev/stderr"
+        exit 43
     }
 }
 ' "$file" > "$tmp"
 
 mv "$tmp" "$file"
 grep -q 'SimGo EC20F: safe NO CARRIER release; do not mutate AT queue' "$file"
+grep -q 'SimGo EC20F: AT+CHUP OK is authoritative for local hangup' "$file"
