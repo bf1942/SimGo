@@ -23,13 +23,15 @@ RUN git clone https://github.com/myleo1/asterisk-chan-quectel-lts.git /tmp/chan-
 
 WORKDIR /tmp/chan-quectel
 
-# EC20F may report remote hangup only as NO CARRIER. Rewrite that handler to
-# release the cpvt through the native Released path without changing/retiring
-# the AT queue after the release transition.
+# EC20F teardown fixes:
+# - remote hangup may arrive only as NO CARRIER
+# - local/SIP-side hangup may return OK to AT+CHUP without a later CEND/NO CARRIER
+# In both cases release the cpvt through the native Released path.
 COPY docker/patch-chan-quectel-ec20f.sh /tmp/patch-chan-quectel-ec20f.sh
 RUN chmod +x /tmp/patch-chan-quectel-ec20f.sh \
     && /tmp/patch-chan-quectel-ec20f.sh /tmp/chan-quectel/at_response.c \
-    && grep -q 'SimGo EC20F: safe NO CARRIER release; do not mutate AT queue' /tmp/chan-quectel/at_response.c
+    && grep -q 'SimGo EC20F: safe NO CARRIER release; do not mutate AT queue' /tmp/chan-quectel/at_response.c \
+    && grep -q 'SimGo EC20F: AT+CHUP OK is authoritative for local hangup' /tmp/chan-quectel/at_response.c
 
 RUN ./bootstrap
 
